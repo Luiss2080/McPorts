@@ -9,10 +9,6 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
 [System.Windows.Forms.Application]::add_ThreadException({
     param($s, $e)
-    if ($env:MCPORTS_SELFTEST -eq '1') {
-        "THREADEXCEPTION: $($e.Exception.Message)" | Out-File -FilePath "$env:TEMP\mcports-selftest-inner.log" -Append
-        return
-    }
     [System.Windows.Forms.MessageBox]::Show("McPorts encontro un error y lo ignoro: $($e.Exception.Message)", 'McPorts', 'OK', 'Warning') | Out-Null
 })
 
@@ -572,28 +568,5 @@ $timer.add_Tick({
 $timer.Start()
 
 try { Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count } catch { }
-
-if ($env:MCPORTS_SELFTEST -eq '1') {
-    $selfTestLog = "$env:TEMP\mcports-selftest-inner.log"
-    Remove-Item $selfTestLog -ErrorAction SilentlyContinue
-    Show-Dashboard
-    $selfTestCount = 0
-    $selfTestTimer = New-Object System.Windows.Forms.Timer
-    $selfTestTimer.Interval = 600
-    $selfTestTimer.add_Tick({
-        $script:selfTestCount++
-        try {
-            & $script:refresh
-            "tick $script:selfTestCount OK" | Out-File -FilePath $selfTestLog -Append
-        } catch {
-            "tick $script:selfTestCount ERROR: $($_.Exception.Message)" | Out-File -FilePath $selfTestLog -Append
-        }
-        if ($script:selfTestCount -ge 5) {
-            $selfTestTimer.Stop()
-            [System.Windows.Forms.Application]::Exit()
-        }
-    })
-    $selfTestTimer.Start()
-}
 
 [System.Windows.Forms.Application]::Run()

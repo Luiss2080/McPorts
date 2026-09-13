@@ -186,7 +186,7 @@ function Show-Dashboard {
     $searchBar.Padding = New-Object System.Windows.Forms.Padding(10, 4, 10, 4)
 
     $lblSearch = New-Object System.Windows.Forms.Label
-    $lblSearch.Text = [char]0x1F50D
+    $lblSearch.Text = 'Buscar:'
     $lblSearch.AutoSize = $true
     $lblSearch.Location = New-Object System.Drawing.Point(10, 8)
 
@@ -569,5 +569,13 @@ $timer.add_Tick({
 $timer.Start()
 
 try { Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count } catch { }
+
+if ($env:MCPORTS_SELFTEST -eq '1') {
+    Show-Dashboard
+    $selfTestTimer = New-Object System.Windows.Forms.Timer
+    $selfTestTimer.Interval = 2500
+    $selfTestTimer.add_Tick({ [System.Windows.Forms.Application]::Exit() })
+    $selfTestTimer.Start()
+}
 
 [System.Windows.Forms.Application]::Run()

@@ -292,14 +292,25 @@ $trayIcon.ContextMenuStrip = $menu
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5 * 60 * 1000
 $timer.add_Tick({
-    $orphanCount = (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count
-    Update-TrayTooltip $orphanCount
-    if ($orphanCount -gt 0) {
-        $trayIcon.ShowBalloonTip(4000, 'McPorts', "$orphanCount proceso(s) huerfano(s) ocupando puertos.", 'Warning')
-    }
+    try {
+        $orphanCount = (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count
+        Update-TrayTooltip $orphanCount
+        if ($orphanCount -gt 0) {
+            $trayIcon.ShowBalloonTip(4000, 'McPorts', "$orphanCount proceso(s) huerfano(s) ocupando puertos.", 'Warning')
+        }
+    } catch { }
 })
 $timer.Start()
 
-Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count
+try { Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count } catch { }
+
+# Any bug that still slips through an event handler shows one quiet
+# message box instead of the default WinForms crash dialog (with its
+# "Continuar/Salir" prompt) - the app keeps running either way.
+[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+[System.Windows.Forms.Application]::add_ThreadException({
+    param($s, $e)
+    [System.Windows.Forms.MessageBox]::Show("McPorts encontro un error y lo ignoro: $($e.Exception.Message)", 'McPorts', 'OK', 'Warning') | Out-Null
+})
 
 [System.Windows.Forms.Application]::Run()

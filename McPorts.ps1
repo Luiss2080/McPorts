@@ -444,4 +444,12 @@ $timer.Start()
 
 try { Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count } catch { }
 
+if ($env:MCPORTS_SELFTEST -eq '1') {
+    Show-Dashboard
+    $selfTestTimer = New-Object System.Windows.Forms.Timer
+    $selfTestTimer.Interval = 2500
+    $selfTestTimer.add_Tick({ [System.Windows.Forms.Application]::Exit() })
+    $selfTestTimer.Start()
+}
+
 [System.Windows.Forms.Application]::Run()

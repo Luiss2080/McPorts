@@ -47,15 +47,25 @@ function Get-DevPorts {
         Select-Object LocalPort, OwningProcess -Unique |
         Group-Object OwningProcess
 
+    if (-not $listeners) { return @() }
+
+    # One bulk WMI query instead of up to two Get-CimInstance calls per
+    # listener (this was the "runs slow" complaint - dozens of individual
+    # WMI round-trips add up to several seconds).
+    $procById = @{}
+    foreach ($p in (Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) { $procById[[int]$p.ProcessId] = $p }
+    $liveById = @{}
+    foreach ($p in (Get-Process -ErrorAction SilentlyContinue)) { $liveById[$p.Id] = $p }
+
     $rows = foreach ($group in $listeners) {
         $procId = [int]$group.Name
-        $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
+        $cim = $procById[$procId]
         if (-not $cim) { continue }
         if (Test-SystemProcess $cim) { continue }
 
-        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        $parentId = $cim.ParentProcessId
-        $parentCim = Get-CimInstance Win32_Process -Filter "ProcessId=$parentId" -ErrorAction SilentlyContinue
+        $proc = $liveById[$procId]
+        $parentId = [int]$cim.ParentProcessId
+        $parentCim = $procById[$parentId]
 
         $parentAlive = $true
         if (-not $parentCim) {
@@ -112,16 +122,14 @@ function Show-Dashboard {
     $grid.AllowUserToDeleteRows = $false
     $grid.SelectionMode = 'FullRowSelect'
     $grid.MultiSelect = $true
-    $grid.AutoSizeColumnsMode = 'Fill'
+    $grid.AutoSizeColumnsMode = 'AllCells'
     $grid.RowHeadersVisible = $false
 
-    $grid.add_CellFormatting({
-        param($s, $e)
-        $row = $grid.Rows[$e.RowIndex]
-        if ($row.Cells['Estado'].Value -eq 'Huerfano') {
-            $row.DefaultCellStyle.BackColor = [System.Drawing.Color]::MistyRose
-        }
-    })
+    $legend = New-Object System.Windows.Forms.Label
+    $legend.Dock = 'Top'
+    $legend.Height = 26
+    $legend.Padding = New-Object System.Windows.Forms.Padding(8, 6, 0, 0)
+    $legend.Text = 'Filas en rojo = huerfano (candidato seguro a matar). El resto son procesos activos, no se tocan.'
 
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Dock = 'Bottom'
@@ -153,36 +161,59 @@ function Show-Dashboard {
     $refresh = {
         $data = @(Get-DevPorts)
         $grid.DataSource = [System.Collections.ArrayList]$data
+
+        foreach ($colName in @('ParentPID', 'Inicio')) {
+            if ($grid.Columns[$colName]) { $grid.Columns[$colName].Visible = $false }
+        }
+        if ($grid.Columns['Comando']) { $grid.Columns['Comando'].AutoSizeMode = 'Fill' }
+
+        # Color rows synchronously right after binding instead of via
+        # CellFormatting - that event fired with stale row indices during
+        # a live refresh and crashed the app ("cannot index into a null
+        # array"). This runs once per refresh, no race.
+        for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
+            if ($grid.Rows[$i].Cells['Estado'].Value -eq 'Huerfano') {
+                $grid.Rows[$i].DefaultCellStyle.BackColor = [System.Drawing.Color]::MistyRose
+            }
+        }
+
         $orphanCount = ($data | Where-Object { $_.Estado -eq 'Huerfano' }).Count
         $lblCount.Text = "$($data.Count) procesos escuchando - $orphanCount huerfanos"
         Update-TrayTooltip $orphanCount
     }
 
-    $btnRefresh.add_Click($refresh)
+    $btnRefresh.add_Click({
+        try { & $refresh } catch { [System.Windows.Forms.MessageBox]::Show("Error al actualizar: $($_.Exception.Message)", 'McPorts') | Out-Null }
+    })
 
     $btnKillSelected.add_Click({
-        $pids = $grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value }
-        foreach ($p in ($pids | Select-Object -Unique)) { Stop-ProcessTreeByPid $p }
-        & $refresh
+        try {
+            $pids = $grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value }
+            foreach ($p in ($pids | Select-Object -Unique)) { Stop-ProcessTreeByPid $p }
+            & $refresh
+        } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
     })
 
     $btnKillOrphans.add_Click({
-        $orphanPids = @($grid.Rows | Where-Object { $_.Cells['Estado'].Value -eq 'Huerfano' } | ForEach-Object { $_.Cells['PID'].Value })
-        if ($orphanPids.Count -eq 0) {
-            [System.Windows.Forms.MessageBox]::Show('No hay procesos huerfanos ahora mismo.', 'McPorts') | Out-Null
-            return
-        }
-        $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a matar $($orphanPids.Count) proceso(s) huerfano(s). Continuar?", 'McPorts', 'YesNo', 'Warning')
-        if ($confirm -eq 'Yes') {
-            foreach ($p in $orphanPids) { Stop-ProcessTreeByPid $p }
-            & $refresh
-        }
+        try {
+            $orphanPids = @($grid.Rows | Where-Object { $_.Cells['Estado'].Value -eq 'Huerfano' } | ForEach-Object { $_.Cells['PID'].Value })
+            if ($orphanPids.Count -eq 0) {
+                [System.Windows.Forms.MessageBox]::Show('No hay procesos huerfanos ahora mismo.', 'McPorts') | Out-Null
+                return
+            }
+            $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a matar $($orphanPids.Count) proceso(s) huerfano(s). Continuar?", 'McPorts', 'YesNo', 'Warning')
+            if ($confirm -eq 'Yes') {
+                foreach ($p in $orphanPids) { Stop-ProcessTreeByPid $p }
+                & $refresh
+            }
+        } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
     })
 
     $form.Controls.Add($grid)
+    $form.Controls.Add($legend)
     $form.Controls.Add($bottom)
 
-    & $refresh
+    try { & $refresh } catch { [System.Windows.Forms.MessageBox]::Show("Error al cargar: $($_.Exception.Message)", 'McPorts') | Out-Null }
 
     $script:DashboardForm = $form
     $form.Show()

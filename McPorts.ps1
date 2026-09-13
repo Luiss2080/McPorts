@@ -191,14 +191,13 @@ function Show-Dashboard {
     $lblSearch.Location = New-Object System.Drawing.Point(10, 8)
 
     $txtSearch = New-Object System.Windows.Forms.TextBox
-    $txtSearch.Location = New-Object System.Drawing.Point(30, 5)
+    $txtSearch.Location = New-Object System.Drawing.Point(65, 5)
     $txtSearch.Size = New-Object System.Drawing.Size(280, 24)
-    $txtSearch.PlaceholderText = 'Filtrar por puerto, proceso, PID o comando...'
 
     $chkAuto = New-Object System.Windows.Forms.CheckBox
     $chkAuto.Text = 'Auto-actualizar (5s)'
     $chkAuto.AutoSize = $true
-    $chkAuto.Location = New-Object System.Drawing.Point(330, 8)
+    $chkAuto.Location = New-Object System.Drawing.Point(360, 8)
 
     $searchBar.Controls.AddRange(@($lblSearch, $txtSearch, $chkAuto))
 

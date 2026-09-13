@@ -1,6 +1,17 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Must run before any Forms control is created on this thread - Windows
+# Forms locks the exception mode in permanently the moment the first
+# Control exists. Without this, any bug in an event handler pops the
+# default "Excepcion no controlada" crash dialog instead of a plain
+# message box, and the app can die if the user clicks Salir on it.
+[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+[System.Windows.Forms.Application]::add_ThreadException({
+    param($s, $e)
+    [System.Windows.Forms.MessageBox]::Show("McPorts encontro un error y lo ignoro: $($e.Exception.Message)", 'McPorts', 'OK', 'Warning') | Out-Null
+})
+
 $ErrorActionPreference = 'Stop'
 $ScriptPath = $MyInvocation.MyCommand.Path
 $StartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'McPorts.lnk'
@@ -303,14 +314,5 @@ $timer.add_Tick({
 $timer.Start()
 
 try { Update-TrayTooltip (@(Get-DevPorts) | Where-Object { $_.Estado -eq 'Huerfano' }).Count } catch { }
-
-# Any bug that still slips through an event handler shows one quiet
-# message box instead of the default WinForms crash dialog (with its
-# "Continuar/Salir" prompt) - the app keeps running either way.
-[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
-[System.Windows.Forms.Application]::add_ThreadException({
-    param($s, $e)
-    [System.Windows.Forms.MessageBox]::Show("McPorts encontro un error y lo ignoro: $($e.Exception.Message)", 'McPorts', 'OK', 'Warning') | Out-Null
-})
 
 [System.Windows.Forms.Application]::Run()

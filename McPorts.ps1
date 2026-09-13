@@ -276,6 +276,13 @@ $itemExit = $menu.Items.Add('Salir')
 
 $itemOpen.add_Click({ Show-Dashboard })
 $trayIcon.add_DoubleClick({ Show-Dashboard })
+# A single left click is what most Windows 11 tray icons respond to
+# (volume, network, etc.) - relying on double-click alone reads as
+# "nothing happens" to anyone who clicks once and waits.
+$trayIcon.add_MouseClick({
+    param($s, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-Dashboard }
+})
 
 $itemKillAll.add_Click({
     $orphans = @(Get-DevPorts | Where-Object { $_.Estado -eq 'Huerfano' })

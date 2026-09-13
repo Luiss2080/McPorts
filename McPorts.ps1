@@ -66,6 +66,10 @@ function Get-DevPorts {
 }
 
 function Stop-ProcessTreeByPid([int]$targetPid) {
+    # Defense in depth: re-check right before killing, never trust a
+    # possibly-stale grid row for a destructive action.
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
+    if (-not $cim -or (Test-SystemProcess $cim)) { return }
     Start-Process -FilePath "$env:WINDIR\System32\taskkill.exe" -ArgumentList "/PID $targetPid /T /F" -WindowStyle Hidden -Wait
 }
 

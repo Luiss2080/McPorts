@@ -149,14 +149,14 @@ function Show-Dashboard {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'McPorts - Puertos y procesos de desarrollo'
-    $form.Size = New-Object System.Drawing.Size(1040, 580)
+    $form.Size = New-Object System.Drawing.Size(1080, 620)
     $form.StartPosition = 'CenterScreen'
     $form.MinimumSize = New-Object System.Drawing.Size(760, 420)
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
     $grid = New-Object System.Windows.Forms.DataGridView
     $grid.Dock = 'Fill'
-    $grid.ReadOnly = $true
+    $grid.ReadOnly = $false
     $grid.AllowUserToAddRows = $false
     $grid.AllowUserToDeleteRows = $false
     $grid.SelectionMode = 'FullRowSelect'
@@ -176,67 +176,111 @@ function Show-Dashboard {
 
     $legend = New-Object System.Windows.Forms.Label
     $legend.Dock = 'Top'
-    $legend.Height = 28
-    $legend.Padding = New-Object System.Windows.Forms.Padding(10, 7, 0, 0)
+    $legend.Height = 26
+    $legend.Padding = New-Object System.Windows.Forms.Padding(10, 6, 0, 0)
     $legend.Text = 'Rojo = huerfano, se puede matar con seguridad.   Verde = servidor de desarrollo activo.   Gris = otra app o servicio, McPorts nunca lo toca.'
+
+    $searchBar = New-Object System.Windows.Forms.Panel
+    $searchBar.Dock = 'Top'
+    $searchBar.Height = 36
+    $searchBar.Padding = New-Object System.Windows.Forms.Padding(10, 4, 10, 4)
+
+    $lblSearch = New-Object System.Windows.Forms.Label
+    $lblSearch.Text = [char]0x1F50D
+    $lblSearch.AutoSize = $true
+    $lblSearch.Location = New-Object System.Drawing.Point(10, 8)
+
+    $txtSearch = New-Object System.Windows.Forms.TextBox
+    $txtSearch.Location = New-Object System.Drawing.Point(30, 5)
+    $txtSearch.Size = New-Object System.Drawing.Size(280, 24)
+    $txtSearch.PlaceholderText = 'Filtrar por puerto, proceso, PID o comando...'
+
+    $chkAuto = New-Object System.Windows.Forms.CheckBox
+    $chkAuto.Text = 'Auto-actualizar (5s)'
+    $chkAuto.AutoSize = $true
+    $chkAuto.Location = New-Object System.Drawing.Point(330, 8)
+
+    $searchBar.Controls.AddRange(@($lblSearch, $txtSearch, $chkAuto))
 
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Dock = 'Bottom'
-    $bottom.Height = 48
-    $bottom.Padding = New-Object System.Windows.Forms.Padding(10, 0, 10, 0)
+    $bottom.Height = 88
 
-    $btnRefresh = New-Object System.Windows.Forms.Button
-    $btnRefresh.Text = [char]0x21BB + ' Actualizar'
-    $btnRefresh.Location = New-Object System.Drawing.Point(10, 9)
-    $btnRefresh.Size = New-Object System.Drawing.Size(110, 30)
-    $btnRefresh.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $flow = New-Object System.Windows.Forms.FlowLayoutPanel
+    $flow.Dock = 'Top'
+    $flow.Height = 40
+    $flow.Padding = New-Object System.Windows.Forms.Padding(10, 6, 10, 0)
+    $flow.WrapContents = $false
+    $flow.AutoScroll = $true
 
-    $btnKillSelected = New-Object System.Windows.Forms.Button
-    $btnKillSelected.Text = [char]0x2715 + ' Matar seleccionados'
-    $btnKillSelected.Location = New-Object System.Drawing.Point(126, 9)
-    $btnKillSelected.Size = New-Object System.Drawing.Size(170, 30)
-    $btnKillSelected.Cursor = [System.Windows.Forms.Cursors]::Hand
+    function New-ToolButton([string]$text, [int]$width) {
+        $b = New-Object System.Windows.Forms.Button
+        $b.Text = $text
+        $b.Size = New-Object System.Drawing.Size($width, 30)
+        $b.Cursor = [System.Windows.Forms.Cursors]::Hand
+        $b.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
+        return $b
+    }
 
-    $btnKillOrphans = New-Object System.Windows.Forms.Button
-    $btnKillOrphans.Text = [char]0x26A0 + ' Matar todos los huerfanos'
-    $btnKillOrphans.Location = New-Object System.Drawing.Point(302, 9)
-    $btnKillOrphans.Size = New-Object System.Drawing.Size(210, 30)
+    $btnRefresh = New-ToolButton ([char]0x21BB + ' Actualizar') 110
+    $btnSelAll = New-ToolButton 'Marcar todos' 110
+    $btnSelNone = New-ToolButton 'Marcar ninguno' 120
+    $btnSelOrphans = New-ToolButton 'Marcar huerfanos' 140
+    $btnKillSelected = New-ToolButton ([char]0x2715 + ' Limpiar marcados') 170
+    $btnKillOrphans = New-ToolButton ([char]0x26A0 + ' Limpiar todo lo no usado') 220
     $btnKillOrphans.FlatStyle = 'Flat'
-    $btnKillOrphans.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+    $flow.Controls.AddRange(@($btnRefresh, $btnSelAll, $btnSelNone, $btnSelOrphans, $btnKillSelected, $btnKillOrphans))
 
     $lblCount = New-Object System.Windows.Forms.Label
     $lblCount.AutoSize = $true
     $lblCount.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
-    $lblCount.Location = New-Object System.Drawing.Point(524, 17)
+    $lblCount.Padding = New-Object System.Windows.Forms.Padding(10, 10, 0, 0)
+    $lblCount.Dock = 'Bottom'
+    $lblCount.Height = 26
     $lblCount.Text = ''
 
-    $bottom.Controls.AddRange(@($btnRefresh, $btnKillSelected, $btnKillOrphans, $lblCount))
+    $bottom.Controls.Add($lblCount)
+    $bottom.Controls.Add($flow)
 
     $colorHuerfano = [System.Drawing.Color]::Crimson
     $colorActivoDev = [System.Drawing.Color]::SeaGreen
     $colorOtro = [System.Drawing.Color]::Gray
 
-    $refresh = {
-        $data = @(Get-DevPorts)
+    # bindGrid renders a data array (already filtered by search text if
+    # any) without re-querying Windows - filtering/typing stays instant.
+    $bindGrid = {
+        param($data)
+
         $grid.DataSource = [System.Collections.ArrayList]$data
 
         foreach ($colName in @('EsDev', 'ParentPID')) {
             if ($grid.Columns[$colName]) { $grid.Columns[$colName].Visible = $false }
         }
         if ($grid.Columns['Comando']) { $grid.Columns['Comando'].AutoSizeMode = 'Fill' }
+        foreach ($colName in @('Puertos', 'PID', 'Proceso', 'Estado', 'Actividad', 'Comando')) {
+            if ($grid.Columns[$colName]) { $grid.Columns[$colName].ReadOnly = $true }
+        }
+
+        $selCol = New-Object System.Windows.Forms.DataGridViewCheckBoxColumn
+        $selCol.Name = 'Sel'
+        $selCol.HeaderText = ''
+        $selCol.Width = 30
+        $grid.Columns.Insert(0, $selCol)
 
         $dotCol = New-Object System.Windows.Forms.DataGridViewImageColumn
         $dotCol.Name = 'Dot'
         $dotCol.HeaderText = ''
-        $dotCol.Width = 28
+        $dotCol.Width = 26
         $dotCol.ImageLayout = 'Zoom'
+        $dotCol.ReadOnly = $true
         $dotCol.DefaultCellStyle.NullValue = $null
-        $grid.Columns.Insert(0, $dotCol)
+        $grid.Columns.Insert(1, $dotCol)
 
         # Color rows synchronously right after binding instead of via
         # CellFormatting - that event fired with stale row indices during
         # a live refresh and crashed the app ("cannot index into a null
-        # array"). This runs once per refresh, no race.
+        # array"). This runs once per bind, no race.
         for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
             $row = $grid.Rows[$i]
             $isHuerfano = $row.Cells['Estado'].Value -eq 'Huerfano'
@@ -247,17 +291,36 @@ function Show-Dashboard {
                 $row.Cells['Estado'].Style.ForeColor = $colorHuerfano
                 $row.Cells['Estado'].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
                 $row.Cells['Dot'].Value = Get-StatusDot $colorHuerfano
+                $row.Cells['Sel'].Value = $true
             } elseif ($isDev) {
                 $row.Cells['Estado'].Style.ForeColor = $colorActivoDev
                 $row.Cells['Dot'].Value = Get-StatusDot $colorActivoDev
             } else {
                 $row.Cells['Estado'].Style.ForeColor = $colorOtro
                 $row.Cells['Dot'].Value = Get-StatusDot $colorOtro
+                $row.Cells['Sel'].ReadOnly = $true
             }
         }
+    }
 
-        $orphanCount = ($data | Where-Object { $_.Estado -eq 'Huerfano' }).Count
-        $lblCount.Text = "$($data.Count) procesos escuchando - $orphanCount huerfanos"
+    # applyFilter re-slices the already-fetched $script:AllData by the
+    # search box text and rebinds - no WMI calls, stays instant while typing.
+    $applyFilter = {
+        $text = $txtSearch.Text
+        $data = if ([string]::IsNullOrWhiteSpace($text)) {
+            $script:AllData
+        } else {
+            $script:AllData | Where-Object {
+                $_.Proceso -like "*$text*" -or $_.Puertos -like "*$text*" -or
+                [string]$_.PID -like "*$text*" -or $_.Comando -like "*$text*"
+            }
+        }
+        & $bindGrid @($data)
+
+        $total = @($script:AllData).Count
+        $orphanCount = @($script:AllData | Where-Object { $_.Estado -eq 'Huerfano' }).Count
+        $shown = @($data).Count
+        $lblCount.Text = if ($shown -eq $total) { "$total procesos escuchando - $orphanCount huerfanos" } else { "Mostrando $shown de $total - $orphanCount huerfanos en total" }
         Update-TrayTooltip $orphanCount
 
         $btnKillOrphans.Enabled = $orphanCount -gt 0
@@ -270,8 +333,44 @@ function Show-Dashboard {
         }
     }
 
+    $refresh = {
+        $script:AllData = @(Get-DevPorts)
+        & $applyFilter
+    }
+
+    # Checkbox edits don't commit until focus leaves the cell by default -
+    # without this a single click looks like it did nothing.
+    $grid.add_CurrentCellDirtyStateChanged({
+        if ($grid.IsCurrentCellDirty -and $grid.CurrentCell.OwningColumn.Name -eq 'Sel') {
+            $grid.CommitEdit([System.Windows.Forms.DataGridViewDataErrorContexts]::Commit)
+        }
+    })
+
+    $txtSearch.add_TextChanged({
+        try { & $applyFilter } catch { }
+    })
+
+    $autoTimer = New-Object System.Windows.Forms.Timer
+    $autoTimer.Interval = 5000
+    $autoTimer.add_Tick({
+        try { & $refresh } catch { }
+    })
+    $chkAuto.add_CheckedChanged({
+        if ($chkAuto.Checked) { $autoTimer.Start() } else { $autoTimer.Stop() }
+    })
+
     $btnRefresh.add_Click({
         try { & $refresh } catch { [System.Windows.Forms.MessageBox]::Show("Error al actualizar: $($_.Exception.Message)", 'McPorts') | Out-Null }
+    })
+
+    $btnSelAll.add_Click({
+        for ($i = 0; $i -lt $grid.Rows.Count; $i++) { if (-not $grid.Rows[$i].Cells['Sel'].ReadOnly) { $grid.Rows[$i].Cells['Sel'].Value = $true } }
+    })
+    $btnSelNone.add_Click({
+        for ($i = 0; $i -lt $grid.Rows.Count; $i++) { $grid.Rows[$i].Cells['Sel'].Value = $false }
+    })
+    $btnSelOrphans.add_Click({
+        for ($i = 0; $i -lt $grid.Rows.Count; $i++) { $grid.Rows[$i].Cells['Sel'].Value = ($grid.Rows[$i].Cells['Estado'].Value -eq 'Huerfano') }
     })
 
     $showKillSummary = {
@@ -285,11 +384,17 @@ function Show-Dashboard {
 
     $btnKillSelected.add_Click({
         try {
-            $pids = @($grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value } | Select-Object -Unique)
+            $pids = New-Object System.Collections.Generic.List[int]
+            for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
+                if ($grid.Rows[$i].Cells['Sel'].Value -eq $true) { $pids.Add([int]$grid.Rows[$i].Cells['PID'].Value) }
+            }
+            $pids = @($pids | Select-Object -Unique)
             if ($pids.Count -eq 0) {
-                [System.Windows.Forms.MessageBox]::Show('Seleccioná primero una o mas filas.', 'McPorts') | Out-Null
+                [System.Windows.Forms.MessageBox]::Show('Marcá el casillero de una o mas filas primero (columna de la izquierda).', 'McPorts') | Out-Null
                 return
             }
+            $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a limpiar $($pids.Count) proceso(s) marcados. Continuar?", 'McPorts', 'YesNo', 'Warning')
+            if ($confirm -ne 'Yes') { return }
             $results = @($pids | ForEach-Object { Stop-ProcessTreeByPid $_ })
             & $refresh
             & $showKillSummary $results
@@ -298,12 +403,12 @@ function Show-Dashboard {
 
     $btnKillOrphans.add_Click({
         try {
-            $orphanPids = @($grid.Rows | Where-Object { $_.Cells['Estado'].Value -eq 'Huerfano' } | ForEach-Object { $_.Cells['PID'].Value })
+            $orphanPids = @($script:AllData | Where-Object { $_.Estado -eq 'Huerfano' } | ForEach-Object { $_.PID })
             if ($orphanPids.Count -eq 0) {
                 [System.Windows.Forms.MessageBox]::Show('No hay procesos huerfanos ahora mismo.', 'McPorts') | Out-Null
                 return
             }
-            $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a matar $($orphanPids.Count) proceso(s) huerfano(s). Continuar?", 'McPorts', 'YesNo', 'Warning')
+            $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a limpiar $($orphanPids.Count) proceso(s) huerfano(s) (servidores abandonados sin proceso padre). Continuar?", 'McPorts', 'YesNo', 'Warning')
             if ($confirm -eq 'Yes') {
                 $results = @($orphanPids | ForEach-Object { Stop-ProcessTreeByPid $_ })
                 & $refresh
@@ -314,6 +419,7 @@ function Show-Dashboard {
 
     $rowMenu = New-Object System.Windows.Forms.ContextMenuStrip
     $rowMenuKill = $rowMenu.Items.Add('Matar este proceso')
+    $rowMenuBrowser = $rowMenu.Items.Add('Abrir en el navegador')
     $rowMenuCopy = $rowMenu.Items.Add('Copiar comando completo')
     $grid.ContextMenuStrip = $rowMenu
 
@@ -323,6 +429,14 @@ function Show-Dashboard {
             $grid.ClearSelection()
             $grid.Rows[$e.RowIndex].Selected = $true
         }
+    })
+
+    $grid.add_CellDoubleClick({
+        param($s, $e)
+        if ($e.RowIndex -lt 0) { return }
+        $row = $grid.Rows[$e.RowIndex]
+        $msg = "Proceso: $($row.Cells['Proceso'].Value)  (PID $($row.Cells['PID'].Value))`nPuertos: $($row.Cells['Puertos'].Value)`nActividad: $($row.Cells['Actividad'].Value)`n`nComando completo:`n$($row.Cells['Comando'].Value)"
+        [System.Windows.Forms.MessageBox]::Show($msg, 'McPorts - Detalle del proceso') | Out-Null
     })
 
     $rowMenuKill.add_Click({
@@ -335,6 +449,15 @@ function Show-Dashboard {
         } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
     })
 
+    $rowMenuBrowser.add_Click({
+        try {
+            $ports = $grid.SelectedRows | Select-Object -First 1 | ForEach-Object { $_.Cells['Puertos'].Value }
+            if (-not $ports) { return }
+            $firstPort = ([string]$ports).Split(',')[0].Trim()
+            if ($firstPort) { Start-Process "http://localhost:$firstPort" }
+        } catch { }
+    })
+
     $rowMenuCopy.add_Click({
         try {
             $cmd = $grid.SelectedRows | Select-Object -First 1 | ForEach-Object { $_.Cells['Comando'].Value }
@@ -343,8 +466,11 @@ function Show-Dashboard {
     })
 
     $form.Controls.Add($grid)
+    $form.Controls.Add($searchBar)
     $form.Controls.Add($legend)
     $form.Controls.Add($bottom)
+
+    $form.add_FormClosed({ $autoTimer.Stop(); $autoTimer.Dispose() })
 
     try { & $refresh } catch { [System.Windows.Forms.MessageBox]::Show("Error al cargar: $($_.Exception.Message)", 'McPorts') | Out-Null }
 

@@ -8,6 +8,23 @@ $VbsLauncher = Join-Path (Split-Path $ScriptPath -Parent) 'Start-McPorts.vbs'
 
 # --- Data collection -------------------------------------------------------
 
+# Never list or touch OS-critical processes. Several of them (wininit,
+# csrss, winlogon...) legitimately outlive the parent that spawned them
+# (smss.exe exits right after boot by design) - that looks exactly like
+# "orphan" to a dead-parent heuristic, but killing them can crash Windows.
+$script:SystemProcessNames = @(
+    'wininit.exe', 'winlogon.exe', 'csrss.exe', 'smss.exe', 'services.exe',
+    'lsass.exe', 'svchost.exe', 'spoolsv.exe', 'dwm.exe', 'fontdrivehost.exe',
+    'System', 'Registry', 'Idle', 'MemCompression', 'Secure System',
+    'explorer.exe', 'sihost.exe', 'ctfmon.exe', 'RuntimeBroker.exe'
+)
+
+function Test-SystemProcess($cim) {
+    if ($script:SystemProcessNames -contains $cim.Name) { return $true }
+    if ($cim.ExecutablePath -and $cim.ExecutablePath.StartsWith($env:WINDIR, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $false
+}
+
 function Get-DevPorts {
     $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalPort, OwningProcess -Unique |
@@ -17,6 +34,7 @@ function Get-DevPorts {
         $procId = [int]$group.Name
         $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
         if (-not $cim) { continue }
+        if (Test-SystemProcess $cim) { continue }
 
         $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         $parentId = $cim.ParentProcessId

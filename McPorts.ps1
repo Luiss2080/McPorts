@@ -88,13 +88,22 @@ function Get-DevPorts {
 
         $ports = ($group.Group.LocalPort | Sort-Object -Unique) -join ', '
 
+        $actividad = ''
+        if ($proc -and $proc.StartTime) {
+            $span = (Get-Date) - $proc.StartTime
+            $actividad = if ($span.TotalDays -ge 1) { "{0}d {1}h" -f [int]$span.TotalDays, $span.Hours }
+                elseif ($span.TotalHours -ge 1) { "{0}h {1}m" -f [int]$span.TotalHours, $span.Minutes }
+                else { "{0}m" -f [Math]::Max(1, [int]$span.TotalMinutes) }
+        }
+
         [PSCustomObject]@{
             Puertos   = $ports
             PID       = $procId
             Proceso   = $cim.Name
             Estado    = if ($isDev -and -not $parentAlive) { 'Huerfano' } else { 'Activo' }
+            EsDev     = $isDev
             ParentPID = $parentId
-            Inicio    = if ($proc) { $proc.StartTime } else { $null }
+            Actividad = $actividad
             Comando   = $cim.CommandLine
         }
     }
@@ -107,12 +116,30 @@ function Stop-ProcessTreeByPid([int]$targetPid) {
     # possibly-stale grid row for a destructive action. Only ever kill
     # something that is BOTH not a system process AND matches the dev
     # interpreter allowlist - never a bare "parent is dead" call.
+    # Returns what actually happened so the UI can report honestly
+    # instead of silently doing nothing.
     $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
-    if (-not $cim -or (Test-SystemProcess $cim) -or -not (Test-DevProcess $cim)) { return }
+    if (-not $cim) { return 'NoEncontrado' }
+    if ((Test-SystemProcess $cim) -or -not (Test-DevProcess $cim)) { return 'OmitidoSeguridad' }
     Start-Process -FilePath "$env:WINDIR\System32\taskkill.exe" -ArgumentList "/PID $targetPid /T /F" -WindowStyle Hidden -Wait
+    return 'Matado'
 }
 
 # --- Dashboard window --------------------------------------------------------
+
+$script:DotCache = @{}
+function Get-StatusDot([System.Drawing.Color]$color) {
+    $key = $color.ToArgb()
+    if ($script:DotCache.ContainsKey($key)) { return $script:DotCache[$key] }
+    $bmp = New-Object System.Drawing.Bitmap(14, 14)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $brush = New-Object System.Drawing.SolidBrush($color)
+    $g.FillEllipse($brush, 1, 1, 12, 12)
+    $g.Dispose(); $brush.Dispose()
+    $script:DotCache[$key] = $bmp
+    return $bmp
+}
 
 function Show-Dashboard {
     if ($script:DashboardForm -and -not $script:DashboardForm.IsDisposed) {

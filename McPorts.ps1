@@ -149,9 +149,10 @@ function Show-Dashboard {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = 'McPorts - Puertos y procesos de desarrollo'
-    $form.Size = New-Object System.Drawing.Size(980, 560)
+    $form.Size = New-Object System.Drawing.Size(1040, 580)
     $form.StartPosition = 'CenterScreen'
-    $form.MinimumSize = New-Object System.Drawing.Size(700, 400)
+    $form.MinimumSize = New-Object System.Drawing.Size(760, 420)
+    $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
     $grid = New-Object System.Windows.Forms.DataGridView
     $grid.Dock = 'Fill'
@@ -162,36 +163,51 @@ function Show-Dashboard {
     $grid.MultiSelect = $true
     $grid.AutoSizeColumnsMode = 'AllCells'
     $grid.RowHeadersVisible = $false
+    $grid.RowTemplate.Height = 26
+    $grid.BackgroundColor = [System.Drawing.Color]::White
+    $grid.BorderStyle = 'None'
+    $grid.GridColor = [System.Drawing.Color]::FromArgb(225, 225, 230)
+    $grid.EnableHeadersVisualStyles = $false
+    $grid.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(45, 55, 72)
+    $grid.ColumnHeadersDefaultCellStyle.ForeColor = [System.Drawing.Color]::White
+    $grid.ColumnHeadersDefaultCellStyle.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $grid.ColumnHeadersHeight = 30
+    $grid.AlternatingRowsDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(247, 248, 250)
 
     $legend = New-Object System.Windows.Forms.Label
     $legend.Dock = 'Top'
-    $legend.Height = 26
-    $legend.Padding = New-Object System.Windows.Forms.Padding(8, 6, 0, 0)
-    $legend.Text = 'Filas en rojo = huerfano (candidato seguro a matar). El resto son procesos activos, no se tocan.'
+    $legend.Height = 28
+    $legend.Padding = New-Object System.Windows.Forms.Padding(10, 7, 0, 0)
+    $legend.Text = 'Rojo = huerfano, se puede matar con seguridad.   Verde = servidor de desarrollo activo.   Gris = otra app o servicio, McPorts nunca lo toca.'
 
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Dock = 'Bottom'
-    $bottom.Height = 44
+    $bottom.Height = 48
+    $bottom.Padding = New-Object System.Windows.Forms.Padding(10, 0, 10, 0)
 
     $btnRefresh = New-Object System.Windows.Forms.Button
-    $btnRefresh.Text = 'Actualizar'
-    $btnRefresh.Location = New-Object System.Drawing.Point(10, 8)
-    $btnRefresh.Size = New-Object System.Drawing.Size(100, 28)
+    $btnRefresh.Text = [char]0x21BB + ' Actualizar'
+    $btnRefresh.Location = New-Object System.Drawing.Point(10, 9)
+    $btnRefresh.Size = New-Object System.Drawing.Size(110, 30)
+    $btnRefresh.Cursor = [System.Windows.Forms.Cursors]::Hand
 
     $btnKillSelected = New-Object System.Windows.Forms.Button
-    $btnKillSelected.Text = 'Matar seleccionados'
-    $btnKillSelected.Location = New-Object System.Drawing.Point(120, 8)
-    $btnKillSelected.Size = New-Object System.Drawing.Size(150, 28)
+    $btnKillSelected.Text = [char]0x2715 + ' Matar seleccionados'
+    $btnKillSelected.Location = New-Object System.Drawing.Point(126, 9)
+    $btnKillSelected.Size = New-Object System.Drawing.Size(170, 30)
+    $btnKillSelected.Cursor = [System.Windows.Forms.Cursors]::Hand
 
     $btnKillOrphans = New-Object System.Windows.Forms.Button
-    $btnKillOrphans.Text = 'Matar todos los huerfanos'
-    $btnKillOrphans.Location = New-Object System.Drawing.Point(280, 8)
-    $btnKillOrphans.Size = New-Object System.Drawing.Size(180, 28)
-    $btnKillOrphans.ForeColor = [System.Drawing.Color]::DarkRed
+    $btnKillOrphans.Text = [char]0x26A0 + ' Matar todos los huerfanos'
+    $btnKillOrphans.Location = New-Object System.Drawing.Point(302, 9)
+    $btnKillOrphans.Size = New-Object System.Drawing.Size(210, 30)
+    $btnKillOrphans.FlatStyle = 'Flat'
+    $btnKillOrphans.Cursor = [System.Windows.Forms.Cursors]::Hand
 
     $lblCount = New-Object System.Windows.Forms.Label
     $lblCount.AutoSize = $true
-    $lblCount.Location = New-Object System.Drawing.Point(480, 15)
+    $lblCount.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+    $lblCount.Location = New-Object System.Drawing.Point(524, 17)
     $lblCount.Text = ''
 
     $bottom.Controls.AddRange(@($btnRefresh, $btnKillSelected, $btnKillOrphans, $lblCount))

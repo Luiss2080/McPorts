@@ -212,39 +212,87 @@ function Show-Dashboard {
 
     $bottom.Controls.AddRange(@($btnRefresh, $btnKillSelected, $btnKillOrphans, $lblCount))
 
+    $colorHuerfano = [System.Drawing.Color]::Crimson
+    $colorActivoDev = [System.Drawing.Color]::SeaGreen
+    $colorOtro = [System.Drawing.Color]::Gray
+
     $refresh = {
         $data = @(Get-DevPorts)
         $grid.DataSource = [System.Collections.ArrayList]$data
 
-        foreach ($colName in @('ParentPID', 'Inicio')) {
+        foreach ($colName in @('EsDev', 'ParentPID')) {
             if ($grid.Columns[$colName]) { $grid.Columns[$colName].Visible = $false }
         }
         if ($grid.Columns['Comando']) { $grid.Columns['Comando'].AutoSizeMode = 'Fill' }
+
+        $dotCol = New-Object System.Windows.Forms.DataGridViewImageColumn
+        $dotCol.Name = 'Dot'
+        $dotCol.HeaderText = ''
+        $dotCol.Width = 28
+        $dotCol.ImageLayout = 'Zoom'
+        $dotCol.DefaultCellStyle.NullValue = $null
+        $grid.Columns.Insert(0, $dotCol)
 
         # Color rows synchronously right after binding instead of via
         # CellFormatting - that event fired with stale row indices during
         # a live refresh and crashed the app ("cannot index into a null
         # array"). This runs once per refresh, no race.
         for ($i = 0; $i -lt $grid.Rows.Count; $i++) {
-            if ($grid.Rows[$i].Cells['Estado'].Value -eq 'Huerfano') {
-                $grid.Rows[$i].DefaultCellStyle.BackColor = [System.Drawing.Color]::MistyRose
+            $row = $grid.Rows[$i]
+            $isHuerfano = $row.Cells['Estado'].Value -eq 'Huerfano'
+            $isDev = $row.Cells['EsDev'].Value -eq $true
+
+            if ($isHuerfano) {
+                $row.DefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(253, 235, 235)
+                $row.Cells['Estado'].Style.ForeColor = $colorHuerfano
+                $row.Cells['Estado'].Style.Font = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
+                $row.Cells['Dot'].Value = Get-StatusDot $colorHuerfano
+            } elseif ($isDev) {
+                $row.Cells['Estado'].Style.ForeColor = $colorActivoDev
+                $row.Cells['Dot'].Value = Get-StatusDot $colorActivoDev
+            } else {
+                $row.Cells['Estado'].Style.ForeColor = $colorOtro
+                $row.Cells['Dot'].Value = Get-StatusDot $colorOtro
             }
         }
 
         $orphanCount = ($data | Where-Object { $_.Estado -eq 'Huerfano' }).Count
         $lblCount.Text = "$($data.Count) procesos escuchando - $orphanCount huerfanos"
         Update-TrayTooltip $orphanCount
+
+        $btnKillOrphans.Enabled = $orphanCount -gt 0
+        if ($orphanCount -gt 0) {
+            $btnKillOrphans.BackColor = [System.Drawing.Color]::FromArgb(220, 53, 69)
+            $btnKillOrphans.ForeColor = [System.Drawing.Color]::White
+        } else {
+            $btnKillOrphans.BackColor = [System.Drawing.SystemColors]::Control
+            $btnKillOrphans.ForeColor = [System.Drawing.SystemColors]::GrayText
+        }
     }
 
     $btnRefresh.add_Click({
         try { & $refresh } catch { [System.Windows.Forms.MessageBox]::Show("Error al actualizar: $($_.Exception.Message)", 'McPorts') | Out-Null }
     })
 
+    $showKillSummary = {
+        param($results)
+        $matados = @($results | Where-Object { $_ -eq 'Matado' }).Count
+        $omitidos = @($results | Where-Object { $_ -eq 'OmitidoSeguridad' }).Count
+        $lines = @("Matados: $matados")
+        if ($omitidos -gt 0) { $lines += "Omitidos por seguridad (no son procesos de desarrollo reconocidos): $omitidos" }
+        [System.Windows.Forms.MessageBox]::Show(($lines -join "`n"), 'McPorts') | Out-Null
+    }
+
     $btnKillSelected.add_Click({
         try {
-            $pids = $grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value }
-            foreach ($p in ($pids | Select-Object -Unique)) { Stop-ProcessTreeByPid $p }
+            $pids = @($grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value } | Select-Object -Unique)
+            if ($pids.Count -eq 0) {
+                [System.Windows.Forms.MessageBox]::Show('Seleccioná primero una o mas filas.', 'McPorts') | Out-Null
+                return
+            }
+            $results = @($pids | ForEach-Object { Stop-ProcessTreeByPid $_ })
             & $refresh
+            & $showKillSummary $results
         } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
     })
 
@@ -257,10 +305,41 @@ function Show-Dashboard {
             }
             $confirm = [System.Windows.Forms.MessageBox]::Show("Se van a matar $($orphanPids.Count) proceso(s) huerfano(s). Continuar?", 'McPorts', 'YesNo', 'Warning')
             if ($confirm -eq 'Yes') {
-                foreach ($p in $orphanPids) { Stop-ProcessTreeByPid $p }
+                $results = @($orphanPids | ForEach-Object { Stop-ProcessTreeByPid $_ })
                 & $refresh
+                & $showKillSummary $results
             }
         } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
+    })
+
+    $rowMenu = New-Object System.Windows.Forms.ContextMenuStrip
+    $rowMenuKill = $rowMenu.Items.Add('Matar este proceso')
+    $rowMenuCopy = $rowMenu.Items.Add('Copiar comando completo')
+    $grid.ContextMenuStrip = $rowMenu
+
+    $grid.add_CellMouseDown({
+        param($s, $e)
+        if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right -and $e.RowIndex -ge 0) {
+            $grid.ClearSelection()
+            $grid.Rows[$e.RowIndex].Selected = $true
+        }
+    })
+
+    $rowMenuKill.add_Click({
+        try {
+            $pids = @($grid.SelectedRows | ForEach-Object { $_.Cells['PID'].Value } | Select-Object -Unique)
+            if ($pids.Count -eq 0) { return }
+            $results = @($pids | ForEach-Object { Stop-ProcessTreeByPid $_ })
+            & $refresh
+            & $showKillSummary $results
+        } catch { [System.Windows.Forms.MessageBox]::Show("Error al matar: $($_.Exception.Message)", 'McPorts') | Out-Null }
+    })
+
+    $rowMenuCopy.add_Click({
+        try {
+            $cmd = $grid.SelectedRows | Select-Object -First 1 | ForEach-Object { $_.Cells['Comando'].Value }
+            if ($cmd) { [System.Windows.Forms.Clipboard]::SetText([string]$cmd) }
+        } catch { }
     })
 
     $form.Controls.Add($grid)

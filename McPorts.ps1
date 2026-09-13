@@ -25,6 +25,23 @@ function Test-SystemProcess($cim) {
     return $false
 }
 
+# "Dead parent" is NOT a safe orphan signal on its own: Electron/multi-process
+# apps (IDEs, terminals, browsers) routinely have a launcher/shim parent that
+# exits right after spawning the real window process - that looks exactly
+# like an orphan too, but killing it closes a real app the user has open
+# (this happened once with Warp and an IDE - never again). So "Huerfano"
+# is only ever computed for a narrow allowlist of known dev-server
+# interpreters; everything else always reports Activo and is never
+# kill-eligible, even if it technically has a dead parent.
+$script:DevProcessNames = @('node.exe', 'npm.cmd', 'npm', 'php.exe', 'php-cgi.exe', 'python.exe', 'pythonw.exe', 'ruby.exe', 'deno.exe', 'bun.exe')
+$script:DevCmdPattern = 'npm|node|vite|next|nodemon|ts-node|yarn|pnpm|artisan|webpack|parcel|react-scripts|ng serve'
+
+function Test-DevProcess($cim) {
+    if ($script:DevProcessNames -contains $cim.Name) { return $true }
+    if ($cim.Name -eq 'cmd.exe' -and $cim.CommandLine -and $cim.CommandLine -match $script:DevCmdPattern) { return $true }
+    return $false
+}
+
 function Get-DevPorts {
     $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
         Select-Object LocalPort, OwningProcess -Unique |
@@ -40,14 +57,13 @@ function Get-DevPorts {
         $parentId = $cim.ParentProcessId
         $parentCim = Get-CimInstance Win32_Process -Filter "ProcessId=$parentId" -ErrorAction SilentlyContinue
 
-        # A PID whose recorded parent is gone (or whose PID was reused by a
-        # process started AFTER this one) has no living original parent.
         $parentAlive = $true
         if (-not $parentCim) {
             $parentAlive = $false
         } elseif ($proc -and $proc.StartTime -and $parentCim.CreationDate -and $parentCim.CreationDate -gt $proc.StartTime) {
             $parentAlive = $false
         }
+        $isDev = Test-DevProcess $cim
 
         $ports = ($group.Group.LocalPort | Sort-Object -Unique) -join ', '
 
@@ -55,7 +71,7 @@ function Get-DevPorts {
             Puertos   = $ports
             PID       = $procId
             Proceso   = $cim.Name
-            Estado    = if ($parentAlive) { 'Activo' } else { 'Huerfano' }
+            Estado    = if ($isDev -and -not $parentAlive) { 'Huerfano' } else { 'Activo' }
             ParentPID = $parentId
             Inicio    = if ($proc) { $proc.StartTime } else { $null }
             Comando   = $cim.CommandLine
@@ -67,9 +83,11 @@ function Get-DevPorts {
 
 function Stop-ProcessTreeByPid([int]$targetPid) {
     # Defense in depth: re-check right before killing, never trust a
-    # possibly-stale grid row for a destructive action.
+    # possibly-stale grid row for a destructive action. Only ever kill
+    # something that is BOTH not a system process AND matches the dev
+    # interpreter allowlist - never a bare "parent is dead" call.
     $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid" -ErrorAction SilentlyContinue
-    if (-not $cim -or (Test-SystemProcess $cim)) { return }
+    if (-not $cim -or (Test-SystemProcess $cim) -or -not (Test-DevProcess $cim)) { return }
     Start-Process -FilePath "$env:WINDIR\System32\taskkill.exe" -ArgumentList "/PID $targetPid /T /F" -WindowStyle Hidden -Wait
 }
 
